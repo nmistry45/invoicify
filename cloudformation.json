@@ -1,0 +1,2395 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "AWS Invoicify CloudFormation",
+  "Resources": {
+    "AuthPool": {
+      "Type": "AWS::Cognito::UserPool",
+      "Properties": {
+        "UserPoolName": "cognitoInvoicify",
+        "Policies": {
+          "PasswordPolicy": {
+            "MinimumLength": 8,
+            "RequireLowercase": true,
+            "RequireNumbers": true,
+            "RequireSymbols": true,
+            "RequireUppercase": true,
+            "TemporaryPasswordValidityDays": 7
+          }
+        },
+        "Schema": [
+          {
+            "Name": "email",
+            "AttributeDataType": "String",
+            "DeveloperOnlyAttribute": false,
+            "Mutable": false,
+            "Required": true,
+            "StringAttributeConstraints": {
+              "MinLength": "6",
+              "MaxLength": "2048"
+            }
+          },
+          {
+            "Name": "username",
+            "AttributeDataType": "String",
+            "DeveloperOnlyAttribute": false,
+            "Mutable": true,
+            "Required": false,
+            "StringAttributeConstraints": {
+              "MinLength": "5",
+              "MaxLength": "2048"
+            }
+          }
+        ],
+        "AutoVerifiedAttributes": ["email"],
+        "EmailVerificationMessage": "Welcome to Invoicify,\n\nYour verification code is {####}. ",
+        "EmailVerificationSubject": "Invoicify: Your verification code",
+        "VerificationMessageTemplate": {
+          "EmailMessage": "Welcome to Invoicify,\n\nYour verification code is {####}. ",
+          "EmailSubject": "Invoicify: Your verification code",
+          "DefaultEmailOption": "CONFIRM_WITH_CODE"
+        },
+        "MfaConfiguration": "OFF",
+        "EmailConfiguration": {
+          "EmailSendingAccount": "COGNITO_DEFAULT"
+        },
+        "UserPoolTags": {
+          "Name": "cognitoInvoicify"
+        },
+        "AdminCreateUserConfig": {
+          "AllowAdminCreateUserOnly": false
+        },
+        "UsernameConfiguration": {
+          "CaseSensitive": false
+        },
+        "AccountRecoverySetting": {
+          "RecoveryMechanisms": [
+            {
+              "Priority": 1,
+              "Name": "verified_email"
+            }
+          ]
+        }
+      }
+    },
+    "UserPoolAppClient": {
+      "Type": "AWS::Cognito::UserPoolClient",
+      "Properties": {
+        "ClientName": "invoicifyClient",
+        "GenerateSecret": false,
+        "UserPoolId": {
+          "Ref": "AuthPool"
+        },
+        "RefreshTokenValidity": 30,
+        "AccessTokenValidity": 60,
+        "IdTokenValidity": 60,
+        "TokenValidityUnits": {
+          "AccessToken": "minutes",
+          "IdToken": "minutes",
+          "RefreshToken": "days"
+        },
+        "ExplicitAuthFlows": [
+          "ALLOW_ADMIN_USER_PASSWORD_AUTH",
+          "ALLOW_CUSTOM_AUTH",
+          "ALLOW_REFRESH_TOKEN_AUTH",
+          "ALLOW_USER_PASSWORD_AUTH",
+          "ALLOW_USER_SRP_AUTH"
+        ],
+
+        "AllowedOAuthFlowsUserPoolClient": false,
+        "PreventUserExistenceErrors": "ENABLED",
+        "EnableTokenRevocation": true
+      }
+    },
+    "invoicifyApplication": {
+      "Type": "AWS::ElasticBeanstalk::Application",
+      "Properties": {
+        "Description": "AWS Elastic Beanstalk Invoicify Application"
+      }
+    },
+    "invoicifyApplicationVersion": {
+      "Type": "AWS::ElasticBeanstalk::ApplicationVersion",
+      "Properties": {
+        "ApplicationName": {
+          "Ref": "invoicifyApplication"
+        },
+        "Description": "AWS ElasticBeanstalk Invoicify Application Version 1",
+        "SourceBundle": {
+          "S3Bucket": "cloudformationapp",
+          "S3Key": "Dockerrun.aws.json"
+        }
+      }
+    },
+    "beanConfigurationTemplate": {
+      "Type": "AWS::ElasticBeanstalk::ConfigurationTemplate",
+      "Properties": {
+        "ApplicationName": {
+          "Ref": "invoicifyApplication"
+        },
+        "Description": "AWS ElasticBeanstalk Invoicify Configuration Template",
+        "OptionSettings": [
+          {
+            "Namespace": "aws:autoscaling:asg",
+            "OptionName": "MinSize",
+            "Value": "2"
+          },
+          {
+            "Namespace": "aws:autoscaling:asg",
+            "OptionName": "MaxSize",
+            "Value": "6"
+          },
+          {
+            "Namespace": "aws:elasticbeanstalk:environment",
+            "OptionName": "EnvironmentType",
+            "Value": "LoadBalanced"
+          },
+          {
+            "Namespace": "aws:autoscaling:launchconfiguration",
+            "OptionName": "IamInstanceProfile",
+            "Value": {
+              "Ref": "MyInstanceProfile"
+            }
+          }
+        ],
+        "SolutionStackName": "64bit Amazon Linux 2 v3.4.17 running Docker"
+      }
+    },
+    "invoicifyEnvironment": {
+      "Type": "AWS::ElasticBeanstalk::Environment",
+      "Properties": {
+        "ApplicationName": {
+          "Ref": "invoicifyApplication"
+        },
+        "Description": "AWS ElasticBeanstalk Invoicify Environment",
+        "TemplateName": {
+          "Ref": "beanConfigurationTemplate"
+        },
+        "VersionLabel": {
+          "Ref": "invoicifyApplicationVersion"
+        }
+      }
+    },
+    "MyInstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles": ["LabRole"]
+      }
+    },
+    "UserTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "TableName": "User",
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "email",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "email",
+            "KeyType": "HASH"
+          }
+        ],
+        "TimeToLiveSpecification": {
+          "AttributeName": "ExpirationTime",
+          "Enabled": true
+        },
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": "10",
+          "WriteCapacityUnits": "10"
+        }
+      }
+    },
+    "CustomerTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "TableName": "Customer",
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "email",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "email",
+            "KeyType": "HASH"
+          }
+        ],
+        "TimeToLiveSpecification": {
+          "AttributeName": "ExpirationTime",
+          "Enabled": true
+        },
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": "10",
+          "WriteCapacityUnits": "10"
+        }
+      },
+      "DependsOn": ["UserTable"]
+    },
+    "InvoiceTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "TableName": "Invoice",
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "invoiceNumber",
+            "AttributeType": "N"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "invoiceNumber",
+            "KeyType": "HASH"
+          }
+        ],
+        "TimeToLiveSpecification": {
+          "AttributeName": "ExpirationTime",
+          "Enabled": true
+        },
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": "10",
+          "WriteCapacityUnits": "10"
+        }
+      },
+      "DependsOn": ["CustomerTable"]
+    },
+    "GeneratePdfQueue": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "QueueName": "GeneratePdfQueue",
+        "VisibilityTimeout": 300
+      }
+    },
+    "AddUserLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "addUser",
+        "Code": {
+          "ZipFile": "const AWS = require(\"aws-sdk\");\n const dynamodb = new AWS.DynamoDB.DocumentClient();\n exports.handler = async (event, context, callback) => {\n const req = JSON.stringify(event);\n const username = event.userName;\n const email = event.request.userAttributes.email;\n const info = { username: username, email: email };\n try {\n await saveUser(info)\n .then(() => {\n callback(null, event);\n })\n .catch((err) => {\n console.log(err);\n callback(null, event);\n });\n } catch (e) {\n return {\n statusCode: 500,\n body: JSON.stringify(e),\n };\n }\n };\n function saveUser(userInfo) {\n const params = {\n TableName: \"User\",\n Item: {\n username: userInfo.username,\n email: userInfo.email,\n },\n };\n return dynamodb.put(params).promise();\n }"
+        },
+        "Description": "Lambda Function to add new users to dynamodb.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "FetchUserLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "fetchUser",
+        "Code": {
+          "ZipFile": "const AWS = require(\"aws-sdk\"); // Load the AWS SDK for Node.js\n exports.handler = async (event, context) => {\n const documentClient = new AWS.DynamoDB.DocumentClient();\n let responseBody = \"\";\n let statusCode = 0;\n let userData = {};\n try {\n const params = {\n TableName: \"User\",\n };\n var result = await documentClient.scan(params).promise();\n result.Items.map((item, index) => {\n let dbUsername = item.username;\n let feUsername = event.username;\n let comparedString = dbUsername.localeCompare(feUsername);\n if (comparedString === 0) {\n userData = result.Items[index];\n }\n });\n responseBody = userData;\n statusCode = 200;\n } catch (err) {\n responseBody = `Unable to get User: ${err}`;\n statusCode = 403;\n }\n const response = {\n statusCode: statusCode,\n headers: {\n \"Content-Type\": \"application/json\",\n },\n data: responseBody,\n };\n return response;\n };"
+        },
+        "Description": "Lambda Function to fetch users from dynamodb.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "DeleteCustomerLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "deleteCustomer",
+        "Code": {
+          "ZipFile": "const AWS = require(\"aws-sdk\"); // Load the AWS SDK for Node.js\n exports.handler = async (event, context) => {\n const documentClient = new AWS.DynamoDB.DocumentClient();\n let responseBody = \"\";\n let statusCode = 0;\n const params = {\n TableName: \"Customer\",\n Key: {\n email: event.email,\n },\n };\n try {\n const data = await documentClient.delete(params).promise();\n responseBody = \"success\";\n statusCode = 200;\n } catch (err) {\n responseBody = `Unable to delete Customer: ${err}`;\n statusCode = 403;\n }\n const response = {\n statusCode: statusCode,\n headers: {\n \"Content-Type\": \"application/json\",\n },\n body: responseBody,\n };\n return response;\n };"
+        },
+        "Description": "Lambda Function to delete customers from dynamodb.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "DeleteInvoiceLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "deleteInvoice",
+        "Code": {
+          "ZipFile": "const AWS = require(\"aws-sdk\"); // Load the AWS SDK for Node.js\n exports.handler = async (event, context) => {\n const documentClient = new AWS.DynamoDB.DocumentClient();\n let responseBody = \"\";\n let statusCode = 0;\n const params = {\n TableName: \"Invoice\",\n Key: {\n invoiceNumber: parseInt(event.invoiceNumber),\n },\n };\n try {\n const data = await documentClient.delete(params).promise();\n responseBody = \"success\";\n statusCode = 200;\n } catch (err) {\n responseBody = `Unable to delete Product: ${err}`;\n statusCode = 403;\n }\n const response = {\n statusCode: statusCode,\n headers: {\n \"Content-Type\": \"application/json\",\n },\n body: responseBody,\n };\n return response;\n };"
+        },
+        "Description": "Lambda Function to delete invoices from dynamodb.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "EditPaymentLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "editPayment",
+        "Code": {
+          "ZipFile": "const AWS = require(\"aws-sdk\"); // Load the AWS SDK for Node.js\n exports.handler = async (event, context) => {\n const documentClient = new AWS.DynamoDB.DocumentClient();\n let responseBody = \"\";\n let statusCode = 0;\n const params = {\n TableName: \"Invoice\",\n Key: {\n invoiceNumber: parseInt(event.invoiceNumber),\n },\n UpdateExpression: \"set payment_status = :n, paid_date = :pd \",\n ExpressionAttributeValues: {\n \":n\": \"Paid\",\n \":pd\": event.paidDate,\n },\n ReturnValues: \"UPDATED_NEW\",\n };\n try {\n const data = await documentClient.update(params).promise();\n responseBody = \"success\";\n statusCode = 204;\n } catch (err) {\n responseBody = `Unable to update Product: ${err}`;\n statusCode = 403;\n }\n const response = {\n statusCode: statusCode,\n headers: {\n \"Content-Type\": \"application/json\",\n },\n data: responseBody,\n };\n return response;\n };"
+        },
+        "Description": "Lambda Function to edit payment status of invoice from dynamodb.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "FetchCustomerLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "fetchCustomer",
+        "Code": {
+          "ZipFile": "const AWS = require(\"aws-sdk\"); // Load the AWS SDK for Node.js\n exports.handler = async (event, context) => {\n const documentClient = new AWS.DynamoDB.DocumentClient();\n let responseBody = \"\";\n let statusCode = 0;\n let customerData = [];\n try {\n const params = {\n TableName: \"Customer\",\n };\n var result = await documentClient.scan(params).promise();\n result.Items.map((item, index) => {\n if (item.creator === event.userID) {\n customerData.push(result.Items[index]);\n }\n });\n responseBody = customerData;\n statusCode = 200;\n } catch (err) {\n responseBody = `Unable to get Customer: ${err}`;\n statusCode = 403;\n }\n const response = {\n statusCode: statusCode,\n headers: {\n \"Content-Type\": \"application/json\",\n },\n data: responseBody,\n };\n return response;\n };"
+        },
+        "Description": "Lambda Function to fetch customers from dynamodb.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "FetchInvoiceLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "fetchInvoice",
+        "Code": {
+          "ZipFile": "const AWS = require(\"aws-sdk\"); // Load the AWS SDK for Node.js\n exports.handler = async (event, context) => {\n const documentClient = new AWS.DynamoDB.DocumentClient();\n let responseBody = \"\";\n let statusCode = 0;\n let particularData = [];\n try {\n const params = {\n TableName: \"Invoice\",\n };\n var result = await documentClient.scan(params).promise();\n result.Items.map((item, index) => {\n if (item.creator === event.userID) {\n particularData.push(result.Items[index]);\n }\n });\n responseBody = particularData;\n statusCode = 200;\n } catch (err) {\n responseBody = `Unable to get Invoice: ${err}`;\n statusCode = 403;\n }\n const response = {\n statusCode: statusCode,\n headers: {\n \"Content-Type\": \"application/json\",\n },\n data: responseBody,\n };\n return response;\n };"
+        },
+        "Description": "Lambda Function to fetch invoices from dynamodb.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "FetchParticularInvoiceLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "fetchParticularInvoice",
+        "Code": {
+          "ZipFile": "const AWS = require(\"aws-sdk\"); // Load the AWS SDK for Node.js\n exports.handler = async (event, context) => {\n const documentClient = new AWS.DynamoDB.DocumentClient();\n let responseBody = \"\";\n let statusCode = 0;\n let particularData = [];\n try {\n const params = {\n TableName: \"Invoice\",\n };\n var result = await documentClient.scan(params).promise();\n result.Items.map((item, index) => {\n if (item.invoiceNumber === parseInt(event.invoiceNumber)) {\n particularData.push(result.Items[index]);\n }\n });\n responseBody = particularData;\n statusCode = 200;\n } catch (err) {\n responseBody = `Unable to get Invoice: ${err}`;\n statusCode = 403;\n }\n const response = {\n statusCode: statusCode,\n headers: {\n \"Content-Type\": \"application/json\",\n },\n data: responseBody,\n };\n return response;\n };"
+        },
+        "Description": "Lambda Function to fetch particular invoice from dynamodb.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "TriggerSQSLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "triggerSQS",
+        "Code": {
+          "ZipFile": "var AWS = require(\"aws-sdk\");\n var sqs = new AWS.SQS();\n exports.handler = async (event) => {\n const req = JSON.stringify(event.invoiceNumber);\n var params = {\n DelaySeconds: 2,\n MessageAttributes: {\n invoiceNumber: {\n DataType: \"Number\",\n StringValue: req,\n },\n },\n MessageBody: req,\n QueueUrl:\n \"https://sqs.us-east-1.amazonaws.com/092337985503/generatePdfQueue\",\n };\n let queueRes = await sqs.sendMessage(params).promise();\n const response = {\n statusCode: 200,\n body: queueRes,\n };\n return response;\n };"
+        },
+        "Description": "Lambda Function to trigger SQS queue.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "PDFReturnLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "PDFReturn",
+        "Code": {
+          "ZipFile": "import base64\n import boto3\n def lambda_handler(event, context):\n s3 = boto3.client(\"s3\")\n bucket_name = \"invoice-pdfsss\"\n file_name = event[\"queryStringParameters\"][\"invoiceNumber\"] + \".pdf\"\n fileObj = s3.get_object(Bucket=bucket_name, Key=file_name)\n file_content = fileObj[\"Body\"].read()\n return {\n \"statusCode\": 200,\n \"headers\": {\n \"Content-Type\": \"application/pdf\",\n \"Content-Disposition\": \"attachment; filename={}\".format(file_name)\n },\n \"body\": base64.b64encode(file_content),\n \"isBase64Encoded\": True,\n }"
+        },
+        "Description": "Lambda Function to return PDF file to user.",
+        "Handler": "lambda_function.lambda_handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "python3.9",
+        "Timeout": 300
+      }
+    },
+    "CreateInvoiceLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "createInvoice",
+        "Code": {
+          "S3Bucket": "lambdacloud",
+          "S3Key": "createInvoice.zip"
+        },
+        "Description": "Lambda Function to create an invoice and store to dynamodb.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "GeneratePDFLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "generatePDF",
+        "Code": {
+          "S3Bucket": "lambdacloud",
+          "S3Key": "generatePDF.zip"
+        },
+        "Description": "Lambda Function to generate a pdf for an invoice.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "SaveCustomerLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "saveCustomer",
+        "Code": {
+          "S3Bucket": "lambdacloud",
+          "S3Key": "saveCustomer.zip"
+        },
+        "Description": "Lambda Function to save a customer to dynamodb.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "SendEmailPdfLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "sendEmailPdf",
+        "Code": {
+          "S3Bucket": "lambdacloud",
+          "S3Key": "sendEmailPdf.zip"
+        },
+        "Description": "Lambda Function to send email to a customer with invoice pdf.",
+        "Handler": "index.handler",
+        "Role": "arn:aws:iam::051155192493:role/LabRole",
+        "Runtime": "nodejs16.x",
+        "Timeout": 300
+      }
+    },
+    "InvoicifyAPI": {
+      "Type": "AWS::ApiGateway::RestApi",
+      "Properties": {
+        "Name": "Invoicify API",
+        "EndpointConfiguration": {
+          "Types": ["REGIONAL"]
+        },
+        "Description": "API for all requests",
+        "FailOnWarnings": true
+      }
+    },
+    "FetchCustomerPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["FetchCustomerLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "AddUserPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["AddUserLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "FetchUserPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["FetchUserLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "DeleteCustomerPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["DeleteCustomerLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "DeleteInvoicePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["DeleteInvoiceLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "EditPaymentPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["EditPaymentLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "FetchInvoicePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["FetchInvoiceLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "FetchParticularInvoicePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["FetchParticularInvoiceLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "TriggerSQSPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["TriggerSQSLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "PDFReturnPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["PDFReturnLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "CreateInvoicePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["CreateInvoiceLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "GeneratePDFPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["GeneratePDFLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "SaveCustomerPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["SaveCustomerLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "SendEmailPdfPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": ["SendEmailPdfLambdaFunction", "Arn"]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:execute-api:",
+              { "Ref": "AWS::Region" },
+              ":",
+              { "Ref": "AWS::AccountId" },
+              ":",
+              { "Ref": "InvoicifyAPI" },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "InvoicifyAPIStage": {
+      "Type": "AWS::ApiGateway::Stage",
+      "DependsOn": ["APIDeployment"],
+      "Properties": {
+        "DeploymentId": { "Ref": "APIDeployment" },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "StageName": "LATEST"
+      }
+    },
+    "APIDeployment": {
+      "Type": "AWS::ApiGateway::Deployment",
+      "DependsOn": [
+        "FetchCustomerGetRequest",
+        "FetchCustomerOptionsRequest",
+        "FetchUserGetRequest",
+        "FetchUserOptionsRequest",
+        "DeleteCustomerGetRequest",
+        "DeleteCustomerOptionsRequest",
+        "DeleteInvoiceGetRequest",
+        "DeleteInvoiceOptionsRequest",
+        "EditPaymentGetRequest",
+        "EditPaymentOptionsRequest",
+        "FetchInvoiceGetRequest",
+        "FetchInvoiceOptionsRequest",
+        "FetchParticularInvoiceGetRequest",
+        "FetchParticularInvoiceOptionsRequest",
+        "PDFReturnGetRequest",
+        "PDFReturnOptionsRequest",
+        "AddCustomerPostRequest",
+        "AddCustomerOptionsRequest",
+        "AddInvoicePostRequest",
+        "AddInvoiceOptionsRequest",
+        "SavePDFPostRequest",
+        "SavePDFOptionsRequest",
+        "SendEmailPostRequest",
+        "SendEmailOptionsRequest"
+      ],
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        }
+      }
+    },
+    "FetchCustomerResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "ParentId": {
+          "Fn::GetAtt": ["InvoicifyAPI", "RootResourceId"]
+        },
+        "PathPart": "fetchCustomer"
+      }
+    },
+    "FetchUserResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "ParentId": {
+          "Fn::GetAtt": ["InvoicifyAPI", "RootResourceId"]
+        },
+        "PathPart": "fetchUser"
+      }
+    },
+    "DeleteCustomerResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "ParentId": {
+          "Fn::GetAtt": ["InvoicifyAPI", "RootResourceId"]
+        },
+        "PathPart": "deleteCustomer"
+      }
+    },
+    "DeleteInvoiceResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "ParentId": {
+          "Fn::GetAtt": ["InvoicifyAPI", "RootResourceId"]
+        },
+        "PathPart": "deleteInvoice"
+      }
+    },
+    "EditPaymentResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "ParentId": {
+          "Fn::GetAtt": ["InvoicifyAPI", "RootResourceId"]
+        },
+        "PathPart": "editPayment"
+      }
+    },
+    "FetchInvoiceResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "ParentId": {
+          "Fn::GetAtt": ["InvoicifyAPI", "RootResourceId"]
+        },
+        "PathPart": "fetchInvoice"
+      }
+    },
+    "FetchParticularInvoiceResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "ParentId": {
+          "Fn::GetAtt": ["InvoicifyAPI", "RootResourceId"]
+        },
+        "PathPart": "fetchParticularInvoice"
+      }
+    },
+    "PDFReturnResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "ParentId": {
+          "Fn::GetAtt": ["InvoicifyAPI", "RootResourceId"]
+        },
+        "PathPart": "PDFReturn"
+      }
+    },
+    "CreateInvoiceResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "ParentId": {
+          "Fn::GetAtt": ["InvoicifyAPI", "RootResourceId"]
+        },
+        "PathPart": "addInvoice"
+      }
+    },
+    "GeneratePDFResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "ParentId": {
+          "Fn::GetAtt": ["InvoicifyAPI", "RootResourceId"]
+        },
+        "PathPart": "savePDF"
+      }
+    },
+    "SaveCustomerResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "ParentId": {
+          "Fn::GetAtt": ["InvoicifyAPI", "RootResourceId"]
+        },
+        "PathPart": "addCustomer"
+      }
+    },
+    "SendEmailPdfResource": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "ParentId": {
+          "Fn::GetAtt": ["InvoicifyAPI", "RootResourceId"]
+        },
+        "PathPart": "sendEmail"
+      }
+    },
+    "FetchCustomerGetRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "GET",
+        "Integration": {
+          "Type": "AWS",
+          "IntegrationHttpMethod": "POST",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:aws:apigateway:",
+                { "Ref": "AWS::Region" },
+                ":lambda:path/2015-03-31/functions/",
+                { "Fn::GetAtt": ["FetchCustomerLambdaFunction", "Arn"] },
+                "/invocations"
+              ]
+            ]
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'GET'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": {
+              "Fn::Join": [
+                "",
+                ["{", "\"userID\": \"$input.params('userID')\"", "}"]
+              ]
+            }
+          }
+        },
+        "RequestParameters": {
+          "method.request.querystring.userID": false
+        },
+
+        "ResourceId": {
+          "Ref": "FetchCustomerResource"
+        },
+
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "FetchCustomerOptionsRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "Integration": {
+          "Type": "MOCK",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": "{\n \"statusCode\": 200\n}"
+          }
+        },
+        "ResourceId": {
+          "Ref": "FetchCustomerResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "FetchUserGetRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "GET",
+        "Integration": {
+          "Type": "AWS",
+          "IntegrationHttpMethod": "POST",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:aws:apigateway:",
+                { "Ref": "AWS::Region" },
+                ":lambda:path/2015-03-31/functions/",
+                { "Fn::GetAtt": ["FetchUserLambdaFunction", "Arn"] },
+                "/invocations"
+              ]
+            ]
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'GET'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": {
+              "Fn::Join": [
+                "",
+                ["{", "\"username\": \"$input.params('username')\"", "}"]
+              ]
+            }
+          }
+        },
+        "RequestParameters": {
+          "method.request.querystring.username": false
+        },
+
+        "ResourceId": {
+          "Ref": "FetchUserResource"
+        },
+
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "FetchUserOptionsRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "Integration": {
+          "Type": "MOCK",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": "{\n \"statusCode\": 200\n}"
+          }
+        },
+        "ResourceId": {
+          "Ref": "FetchUserResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "DeleteCustomerGetRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "GET",
+        "Integration": {
+          "Type": "AWS",
+          "IntegrationHttpMethod": "POST",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:aws:apigateway:",
+                { "Ref": "AWS::Region" },
+                ":lambda:path/2015-03-31/functions/",
+                { "Fn::GetAtt": ["DeleteCustomerLambdaFunction", "Arn"] },
+                "/invocations"
+              ]
+            ]
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'GET'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": {
+              "Fn::Join": [
+                "",
+                ["{", "\"email\": \"$input.params('email')\"", "}"]
+              ]
+            }
+          }
+        },
+        "RequestParameters": {
+          "method.request.querystring.email": false
+        },
+
+        "ResourceId": {
+          "Ref": "DeleteCustomerResource"
+        },
+
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "DeleteCustomerOptionsRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "Integration": {
+          "Type": "MOCK",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": "{\n \"statusCode\": 200\n}"
+          }
+        },
+        "ResourceId": {
+          "Ref": "DeleteCustomerResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "DeleteInvoiceGetRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "GET",
+        "Integration": {
+          "Type": "AWS",
+          "IntegrationHttpMethod": "POST",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:aws:apigateway:",
+                { "Ref": "AWS::Region" },
+                ":lambda:path/2015-03-31/functions/",
+                { "Fn::GetAtt": ["DeleteInvoiceLambdaFunction", "Arn"] },
+                "/invocations"
+              ]
+            ]
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'GET'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": {
+              "Fn::Join": [
+                "",
+                [
+                  "{",
+                  "\"invoiceNumber\": \"$input.params('invoiceNumber')\"",
+                  "}"
+                ]
+              ]
+            }
+          }
+        },
+        "RequestParameters": {
+          "method.request.querystring.invoiceNumber": false
+        },
+
+        "ResourceId": {
+          "Ref": "DeleteInvoiceResource"
+        },
+
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "DeleteInvoiceOptionsRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "Integration": {
+          "Type": "MOCK",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": "{\n \"statusCode\": 200\n}"
+          }
+        },
+        "ResourceId": {
+          "Ref": "DeleteInvoiceResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "EditPaymentGetRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "GET",
+        "Integration": {
+          "Type": "AWS",
+          "IntegrationHttpMethod": "POST",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:aws:apigateway:",
+                { "Ref": "AWS::Region" },
+                ":lambda:path/2015-03-31/functions/",
+                { "Fn::GetAtt": ["EditPaymentLambdaFunction", "Arn"] },
+                "/invocations"
+              ]
+            ]
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'GET'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": {
+              "Fn::Join": [
+                "",
+                [
+                  "{",
+                  "\"invoiceNumber\": \"$input.params('invoiceNumber')\"",
+                  "\"paidDate\": \"$util.escapeJavaScript(\"$input.params('paidDate')\")\"",
+                  "}"
+                ]
+              ]
+            }
+          }
+        },
+        "RequestParameters": {
+          "method.request.querystring.invoiceNumber": false,
+          "method.request.querystring.paidDate": false
+        },
+
+        "ResourceId": {
+          "Ref": "EditPaymentResource"
+        },
+
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "EditPaymentOptionsRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "Integration": {
+          "Type": "MOCK",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": "{\n \"statusCode\": 200\n}"
+          }
+        },
+        "ResourceId": {
+          "Ref": "EditPaymentResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "FetchInvoiceGetRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "GET",
+        "Integration": {
+          "Type": "AWS",
+          "IntegrationHttpMethod": "POST",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:aws:apigateway:",
+                { "Ref": "AWS::Region" },
+                ":lambda:path/2015-03-31/functions/",
+                { "Fn::GetAtt": ["FetchInvoiceLambdaFunction", "Arn"] },
+                "/invocations"
+              ]
+            ]
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'GET'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": {
+              "Fn::Join": [
+                "",
+                ["{", "\"userID\": \"$input.params('userID')\"", "}"]
+              ]
+            }
+          }
+        },
+        "RequestParameters": {
+          "method.request.querystring.userID": false
+        },
+
+        "ResourceId": {
+          "Ref": "FetchInvoiceResource"
+        },
+
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "FetchInvoiceOptionsRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "Integration": {
+          "Type": "MOCK",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": "{\n \"statusCode\": 200\n}"
+          }
+        },
+        "ResourceId": {
+          "Ref": "FetchInvoiceResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "FetchParticularInvoiceGetRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "GET",
+        "Integration": {
+          "Type": "AWS",
+          "IntegrationHttpMethod": "POST",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:aws:apigateway:",
+                { "Ref": "AWS::Region" },
+                ":lambda:path/2015-03-31/functions/",
+                {
+                  "Fn::GetAtt": ["FetchParticularInvoiceLambdaFunction", "Arn"]
+                },
+                "/invocations"
+              ]
+            ]
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'GET'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": {
+              "Fn::Join": [
+                "",
+                [
+                  "{",
+                  "\"invoiceNumber\": \"$input.params('invoiceNumber')\"",
+                  "}"
+                ]
+              ]
+            }
+          }
+        },
+        "RequestParameters": {
+          "method.request.querystring.invoiceNumber": false
+        },
+
+        "ResourceId": {
+          "Ref": "FetchParticularInvoiceResource"
+        },
+
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "FetchParticularInvoiceOptionsRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "Integration": {
+          "Type": "MOCK",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": "{\n \"statusCode\": 200\n}"
+          }
+        },
+        "ResourceId": {
+          "Ref": "FetchParticularInvoiceResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "PDFReturnGetRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "GET",
+        "Integration": {
+          "Type": "AWS",
+          "IntegrationHttpMethod": "POST",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:aws:apigateway:",
+                { "Ref": "AWS::Region" },
+                ":lambda:path/2015-03-31/functions/",
+                {
+                  "Fn::GetAtt": ["PDFReturnLambdaFunction", "Arn"]
+                },
+                "/invocations"
+              ]
+            ]
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'GET'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": {
+              "Fn::Join": [
+                "",
+                [
+                  "{",
+                  "\"invoiceNumber\": \"$input.params('invoiceNumber')\"",
+                  "}"
+                ]
+              ]
+            }
+          }
+        },
+        "RequestParameters": {
+          "method.request.querystring.invoiceNumber": false
+        },
+
+        "ResourceId": {
+          "Ref": "PDFReturnResource"
+        },
+
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "PDFReturnOptionsRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "Integration": {
+          "Type": "MOCK",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": "{\n \"statusCode\": 200\n}"
+          }
+        },
+        "ResourceId": {
+          "Ref": "PDFReturnResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "AddCustomerPostRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "POST",
+        "Integration": {
+          "Type": "AWS",
+          "IntegrationHttpMethod": "POST",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:aws:apigateway:",
+                { "Ref": "AWS::Region" },
+                ":lambda:path/2015-03-31/functions/",
+                {
+                  "Fn::GetAtt": ["SaveCustomerLambdaFunction", "Arn"]
+                },
+                "/invocations"
+              ]
+            ]
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'POST'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ]
+        },
+        "ResourceId": {
+          "Ref": "SaveCustomerResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "AddCustomerOptionsRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "Integration": {
+          "Type": "MOCK",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": "{\n \"statusCode\": 200\n}"
+          }
+        },
+        "ResourceId": {
+          "Ref": "SaveCustomerResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "AddInvoicePostRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "POST",
+        "Integration": {
+          "Type": "AWS",
+          "IntegrationHttpMethod": "POST",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:aws:apigateway:",
+                { "Ref": "AWS::Region" },
+                ":lambda:path/2015-03-31/functions/",
+                {
+                  "Fn::GetAtt": ["CreateInvoiceLambdaFunction", "Arn"]
+                },
+                "/invocations"
+              ]
+            ]
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'POST'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ]
+        },
+        "ResourceId": {
+          "Ref": "CreateInvoiceResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "AddInvoiceOptionsRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "Integration": {
+          "Type": "MOCK",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": "{\n \"statusCode\": 200\n}"
+          }
+        },
+        "ResourceId": {
+          "Ref": "CreateInvoiceResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "SavePDFPostRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "POST",
+        "Integration": {
+          "Type": "AWS",
+          "IntegrationHttpMethod": "POST",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:aws:apigateway:",
+                { "Ref": "AWS::Region" },
+                ":lambda:path/2015-03-31/functions/",
+                {
+                  "Fn::GetAtt": ["TriggerSQSLambdaFunction", "Arn"]
+                },
+                "/invocations"
+              ]
+            ]
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'POST'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ]
+        },
+        "ResourceId": {
+          "Ref": "GeneratePDFResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "SavePDFOptionsRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "Integration": {
+          "Type": "MOCK",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": "{\n \"statusCode\": 200\n}"
+          }
+        },
+        "ResourceId": {
+          "Ref": "GeneratePDFResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "SendEmailPostRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "POST",
+        "Integration": {
+          "Type": "AWS",
+          "IntegrationHttpMethod": "POST",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:aws:apigateway:",
+                { "Ref": "AWS::Region" },
+                ":lambda:path/2015-03-31/functions/",
+                {
+                  "Fn::GetAtt": ["SendEmailPdfLambdaFunction", "Arn"]
+                },
+                "/invocations"
+              ]
+            ]
+          },
+          "PassthroughBehavior": "WHEN_NO_TEMPLATES",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'POST'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ]
+        },
+        "ResourceId": {
+          "Ref": "SendEmailPdfResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    },
+    "SendEmailOptionsRequest": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "Integration": {
+          "Type": "MOCK",
+          "IntegrationResponses": [
+            {
+              "StatusCode": 200,
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Headers": "'*'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS'",
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Credentials": "'true'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ],
+          "RequestTemplates": {
+            "application/json": "{\n \"statusCode\": 200\n}"
+          }
+        },
+        "ResourceId": {
+          "Ref": "SendEmailPdfResource"
+        },
+        "RestApiId": {
+          "Ref": "InvoicifyAPI"
+        },
+        "MethodResponses": [
+          {
+            "StatusCode": 200,
+            "ResponseModels": {
+              "application/json": "Empty"
+            },
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true,
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Credentials": true
+            }
+          }
+        ]
+      }
+    }
+  }
+}
