@@ -42,7 +42,7 @@ exports.handler = function (event, context, callback) {
         secure: true,
         auth: {
           user: "invoicifyapp@gmail.com",
-          pass: "dodfiiqayytzipjj",
+          pass: "",
         },
         tls: {
           rejectUnauthorized: false,
